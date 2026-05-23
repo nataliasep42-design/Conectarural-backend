@@ -1,0 +1,18 @@
+# Dependencias — nunca se suben al repositorio
+node_modules/
+ 
+# Variables de entorno — contiene contraseñas y claves secretas
+# NUNCA subir este archivo a GitHub
+.env
+ 
+# Logs
+*.log
+npm-debug.log*
+ 
+# Sistema operativo
+.DS_Store
+Thumbs.db
+ 
+# Editor
+.vscode/
+.idea/
