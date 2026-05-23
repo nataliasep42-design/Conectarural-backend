@@ -192,5 +192,5 @@ Este repositorio documenta la primera versión funcional del backend de ConectaR
 
 ## Autora
 
-**Natalia Betancur**  
+**Natalia Betancur y Natalia Reguilon**  
 Proyecto Final de Ciclo — Sistemas de Telecomunicaciones e Informáticos.
