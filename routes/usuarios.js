@@ -80,7 +80,7 @@ router.put('/:id', authenticateToken, requireRol(3), async (req, res) => {
     return res.status(400).json({ error: 'Debes enviar al menos un campo para actualizar' });
   }
  
-  const estadosValidos = ['activo', 'inactivo'];
+  const estadosValidos = ['activo', 'inactivo', 'bloqueado'];
   if (estado && !estadosValidos.includes(estado)) {
     return res.status(400).json({ error: `estado debe ser: ${estadosValidos.join(', ')}` });
   }

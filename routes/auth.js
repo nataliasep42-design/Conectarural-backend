@@ -80,11 +80,11 @@ router.post('/login', async (req, res) => {
     }
  
     // Verificar que la cuenta esté activa
-    // Una usuaria desactivada desde el backoffice no puede entrar
     if (user.estado !== 'activo') {
-      return res.status(403).json({
-        error: 'Tu cuenta está desactivada. Contacta con el administrador.'
-      });
+      const msg = user.estado === 'bloqueado'
+        ? 'Tu cuenta ha sido bloqueada. Contacta con el administrador.'
+        : 'Tu cuenta está desactivada. Contacta con el administrador.';
+      return res.status(403).json({ error: msg });
     }
  
     // Comparar contraseña con el hash

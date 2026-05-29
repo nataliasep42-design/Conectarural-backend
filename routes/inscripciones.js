@@ -114,6 +114,7 @@ router.get('/progreso/mis-cursos', authenticateToken, async (req, res) => {
         m.titulo             AS modulo_titulo,
         m.orden,
         m.size_mb,
+        m.url_archivo,
         p.porcentaje,
         p.completado,
         p.last_access,
@@ -153,6 +154,7 @@ router.get('/progreso/mis-cursos', authenticateToken, async (req, res) => {
         titulo:      row.modulo_titulo,
         orden:       row.orden,
         size_mb:     row.size_mb,
+        url_archivo: row.url_archivo ?? null,
         porcentaje:  row.porcentaje  ?? 0,
         completado:  row.completado  ?? false,
         last_access: row.last_access ?? null

@@ -225,18 +225,18 @@ router.post('/cursos/:id/modulos', authenticateToken, requireRol(3), async (req,
 // PUT /modulos/:id -----------------------------------------------------------------
 // Editar módulo — solo admin (rol 3)
 router.put('/modulos/:id', authenticateToken, requireRol(3), async (req, res) => {
-  const { titulo, descripcion, orden, size_mb, estado } = req.body;
- 
+  const { titulo, descripcion, orden, size_mb, url_archivo, estado } = req.body;
+
   if (!titulo && !descripcion && orden === undefined &&
-      size_mb === undefined && !estado) {
+      size_mb === undefined && url_archivo === undefined && !estado) {
     return res.status(400).json({ error: 'Debes enviar al menos un campo para actualizar' });
   }
- 
+
   const estadosValidos = ['activo', 'inactivo'];
   if (estado && !estadosValidos.includes(estado)) {
     return res.status(400).json({ error: `estado debe ser: ${estadosValidos.join(', ')}` });
   }
- 
+
   try {
     const sql = `
       UPDATE modulo
@@ -244,11 +244,12 @@ router.put('/modulos/:id', authenticateToken, requireRol(3), async (req, res) =>
           descripcion = COALESCE($2, descripcion),
           orden       = COALESCE($3, orden),
           size_mb     = COALESCE($4, size_mb),
-          estado      = COALESCE($5, estado)
-      WHERE id_modulo = $6
+          url_archivo = COALESCE($5, url_archivo),
+          estado      = COALESCE($6, estado)
+      WHERE id_modulo = $7
       RETURNING *;
     `;
-    const result = await query(sql, [titulo, descripcion, orden, size_mb, estado, req.params.id]);
+    const result = await query(sql, [titulo, descripcion, orden, size_mb, url_archivo || null, estado, req.params.id]);
     if (result.rows.length === 0)
       return res.status(404).json({ error: 'Módulo no encontrado' });
     res.json({ message: 'Módulo actualizado', modulo: result.rows[0] });

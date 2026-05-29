@@ -10,12 +10,6 @@ const { isAdmin, isAdminOrTecnica } = require('../middleware/isAdmin');
 // ── Aplicar autenticacion a todas las rutas de este router ────────────────
 router.use(authenticateToken);
 
-// LOG TEMPORAL — borrar después
-router.use((req, res, next) => {
-  console.log('USER EN ADMIN:', JSON.stringify(req.user));
-  next();
-});
-
 
 // ═══════════════════════════════════════════════════════════════════════════
 // STATS — Dashboard
@@ -57,7 +51,6 @@ router.get('/stats', isAdminOrTecnica, async (req, res) => {
 // GET /admin/usuarias?search=&zona=&estado=
 // ═══════════════════════════════════════════════════════════════════════════
 router.get('/usuarias', isAdminOrTecnica, async (req, res) => {
-    console.log('req.user completo:', req.user);
   try {
     const { search, zona, estado } = req.query;
 
@@ -71,6 +64,7 @@ router.get('/usuarias', isAdminOrTecnica, async (req, res) => {
         u.zona,
         u.estado,
         u.fecha_alta,
+        u.id_rol,
         r.nombre_rol
       FROM usuario u
       JOIN rol r ON u.id_rol = r.id_rol
@@ -105,6 +99,61 @@ router.get('/usuarias', isAdminOrTecnica, async (req, res) => {
   } catch (err) {
     console.error('Error en /admin/usuarias:', err);
     res.status(500).json({ error: 'Error al obtener usuarias' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ACTUALIZAR USUARIA — rol o estado
+// PUT /admin/usuarias/:id   body: { id_rol?, estado? }
+// ═══════════════════════════════════════════════════════════════════════════
+router.put('/usuarias/:id', isAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { id_rol, estado } = req.body;
+
+    if (!id_rol && !estado) {
+      return res.status(400).json({ error: 'Debes enviar id_rol o estado' });
+    }
+
+    if (id_rol !== undefined) {
+      const rolInt = parseInt(id_rol);
+      if (![1, 2].includes(rolInt)) {
+        return res.status(400).json({ error: 'id_rol debe ser 1 (usuaria) o 2 (tecnica)' });
+      }
+    }
+
+    const estadosValidos = ['activo', 'inactivo', 'bloqueado'];
+    if (estado && !estadosValidos.includes(estado)) {
+      return res.status(400).json({ error: `estado debe ser: ${estadosValidos.join(', ')}` });
+    }
+
+    const fields = [];
+    const params = [];
+
+    if (id_rol !== undefined) {
+      params.push(parseInt(id_rol));
+      fields.push(`id_rol = $${params.length}`);
+    }
+    if (estado) {
+      params.push(estado);
+      fields.push(`estado = $${params.length}`);
+    }
+
+    params.push(id);
+    const { rows, rowCount } = await db.query(
+      `UPDATE usuario SET ${fields.join(', ')} WHERE id_usuario = $${params.length}
+       RETURNING id_usuario, nombre, apellidos, email, id_rol, estado`,
+      params
+    );
+
+    if (rowCount === 0) {
+      return res.status(404).json({ error: 'Usuario no encontrado' });
+    }
+
+    res.json({ message: 'Usuario actualizado', usuario: rows[0] });
+  } catch (err) {
+    console.error('Error en PUT /admin/usuarias/:id:', err);
+    res.status(500).json({ error: 'Error al actualizar el usuario' });
   }
 });
 
@@ -418,17 +467,18 @@ router.post('/modulos/:idCurso', isAdmin, async (req, res) => {
 router.put('/modulos/:id', isAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const { titulo, descripcion, orden, size_mb } = req.body;
+    const { titulo, descripcion, orden, size_mb, url_archivo } = req.body;
 
     const { rows, rowCount } = await db.query(
       `UPDATE modulo SET
         titulo      = COALESCE($1, titulo),
         descripcion = COALESCE($2, descripcion),
         orden       = COALESCE($3, orden),
-        size_mb     = COALESCE($4, size_mb)
-       WHERE id_modulo = $5
+        size_mb     = COALESCE($4, size_mb),
+        url_archivo = COALESCE($5, url_archivo)
+       WHERE id_modulo = $6
        RETURNING *`,
-      [titulo, descripcion, orden, size_mb, id]
+      [titulo, descripcion, orden, size_mb, url_archivo || null, id]
     );
 
     if (rowCount === 0) {

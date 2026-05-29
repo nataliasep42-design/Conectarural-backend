@@ -16,10 +16,6 @@ const pool = new Pool({
   password: process.env.PGPASSWORD,
   client_encoding: 'UTF8',
 });
-  
-pool.on('connect', async (client) => {
-  await client.query("SET client_encoding = 'UTF8'");
-});
 
 pool.on('error', (err) => {
   console.error('Error inesperado en el pool de PostgreSQL:', err);
