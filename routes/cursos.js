@@ -63,7 +63,7 @@ router.get('/cursos/:id', async (req, res) => {
       SELECT
         c.id_curso, c.titulo AS curso_titulo, c.descripcion AS curso_desc,
         c.duracion, c.descargable,
-        m.id_modulo, m.titulo AS modulo_titulo, m.orden, m.size_mb
+        m.id_modulo, m.titulo AS modulo_titulo, m.orden, m.size_mb, m.url_archivo
       FROM curso c
       LEFT JOIN modulo m ON c.id_curso = m.id_curso
       WHERE c.id_curso = $1
@@ -85,10 +85,11 @@ router.get('/cursos/:id', async (req, res) => {
       modulos: result.rows
         .filter(row => row.id_modulo !== null)
         .map(row => ({
-          id_modulo: row.id_modulo,
-          titulo:    row.modulo_titulo,
-          orden:     row.orden,
-          size_mb:   row.size_mb
+          id_modulo:   row.id_modulo,
+          titulo:      row.modulo_titulo,
+          orden:       row.orden,
+          size_mb:     row.size_mb,
+          url_archivo: row.url_archivo
         }))
     };
  
@@ -194,26 +195,24 @@ router.put('/cursos/:id', authenticateToken, requireRol(3), async (req, res) => 
 // POST /cursos/:id/modulos ---------------------------------------------------------
 // Crear módulo dentro de un curso — solo admin (rol 3)
 router.post('/cursos/:id/modulos', authenticateToken, requireRol(3), async (req, res) => {
-  const { titulo, descripcion, orden, size_mb } = req.body;
- 
-  // Validaciones
+  const { titulo, descripcion, orden, size_mb, url_archivo } = req.body;
+
   if (!titulo) {
     return res.status(400).json({ error: 'El campo titulo es obligatorio' });
   }
   if (orden === undefined || isNaN(parseInt(orden)) || orden < 1) {
     return res.status(400).json({ error: 'orden es obligatorio y debe ser un número mayor que 0' });
   }
- 
+
   try {
     const sql = `
-      INSERT INTO modulo (id_curso, titulo, descripcion, orden, size_mb)
-      VALUES ($1, $2, $3, $4, $5)
+      INSERT INTO modulo (id_curso, titulo, descripcion, orden, size_mb, url_archivo)
+      VALUES ($1, $2, $3, $4, $5, $6)
       RETURNING *;
     `;
-    const result = await query(sql, [req.params.id, titulo, descripcion, orden, size_mb]);
+    const result = await query(sql, [req.params.id, titulo, descripcion, orden, size_mb, url_archivo || null]);
     res.status(201).json({ message: 'Módulo creado', modulo: result.rows[0] });
   } catch (error) {
-    // Error de FK: el curso no existe
     if (error.code === '23503') {
       return res.status(404).json({ error: 'El curso indicado no existe' });
     }

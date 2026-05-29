@@ -46,7 +46,7 @@ router.get('/mias', authenticateToken, async (req, res) => {
   const idUsuario = req.user.id;
   try {
     const sql = `
-      SELECT id_incidencia, asunto, descripcion, prioridad,
+      SELECT id_incidencia, asunto, descripcion, respuesta, prioridad,
              estado, tipo_contacto, date_create
       FROM incidencia
       WHERE id_usuario = $1
@@ -92,42 +92,43 @@ router.get('/asignadas', authenticateToken, requireRol(2, 3), async (req, res) =
  
  
 // PUT /incidencias/:id -------------------------------------------
-//solo puede hacerlo la técnica asignada
+// La técnica asignada o admin pueden cambiar estado y contestar
 router.put('/:id', authenticateToken, requireRol(2, 3), async (req, res) => {
-  const { estado, descripcion } = req.body;
- 
-  if (!estado && !descripcion) {
-    return res.status(400).json({ error: 'Debes enviar al menos un campo: estado o descripcion' });
+  const { estado, descripcion, respuesta } = req.body;
+
+  if (!estado && !descripcion && respuesta === undefined) {
+    return res.status(400).json({ error: 'Debes enviar al menos un campo: estado, descripcion o respuesta' });
   }
- 
-  // Validar valores permitidos para estado
+
   const estadosValidos = ['abierta', 'en_proceso', 'cerrada'];
   if (estado && !estadosValidos.includes(estado)) {
     return res.status(400).json({ error: `estado debe ser: ${estadosValidos.join(', ')}` });
   }
- 
+
   if (isNaN(parseInt(req.params.id))) {
     return res.status(400).json({ error: 'El id de la incidencia debe ser un número' });
   }
- 
+
   try {
     const sql = `
       UPDATE incidencia
       SET estado      = COALESCE($1, estado),
-          descripcion = COALESCE($2, descripcion)
-      WHERE id_incidencia = $3
-        AND (id_tecnico = $4 OR $5 = 3)
+          descripcion = COALESCE($2, descripcion),
+          respuesta   = COALESCE($3, respuesta)
+      WHERE id_incidencia = $4
+        AND (id_tecnico = $5 OR $6 = 3)
       RETURNING *;
     `;
-    // $4 = id de la técnica logueada
-    // $5 = rol del usuario logueado (si es 3 = admin, puede editar cualquiera)
-    const result = await query(sql, [estado, descripcion, req.params.id, req.user.id, req.user.rol]);
- 
+    const result = await query(sql, [
+      estado, descripcion, respuesta,
+      req.params.id, req.user.id, req.user.rol
+    ]);
+
     if (result.rows.length === 0)
       return res.status(404).json({
         error: 'Incidencia no encontrada o no tienes permisos para modificarla'
       });
- 
+
     res.json({ message: 'Incidencia actualizada', incidencia: result.rows[0] });
   } catch (error) {
     console.error(error);

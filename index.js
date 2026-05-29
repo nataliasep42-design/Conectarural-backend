@@ -6,9 +6,9 @@ const dotenv = require('dotenv');
 const allowedOrigins = [
   'http://localhost:3000',
   'http://localhost:5173',
-  'http://localhost:8080'
+  'http://localhost:8080',
+  /^http:\/\/localhost:\d+$/,  // permite CUALQUIER puerto localhost
 ];
-
  
 // Carga variables de entorno (.env) — SIEMPRE lo primero
 dotenv.config();
@@ -25,11 +25,16 @@ const authLimiter = rateLimit({
 // Middlewares globales
 app.use(cors({
   origin: function (origin, callback) {
-    if (!origin || allowedOrigins.includes(origin)) {
-      return callback(null, true);
-    }
+    if (!origin) return callback(null, true);
+    
+    const allowed = allowedOrigins.some(o =>
+      typeof o === 'string' ? o === origin : o.test(origin)
+    );
+    
+    if (allowed) return callback(null, true);
     return callback(new Error('Origen no permitido por CORS'));
-  }
+  },
+  credentials: true,
 }));
 app.use(express.json());
  
@@ -64,7 +69,7 @@ app.use('/',            require('./routes/descargas'));
 app.use('/incidencias', require('./routes/incidencias'));
 app.use('/',            require('./routes/asignaciones'));
 app.use('/',            require('./routes/stats'));
- 
+app.use('/admin',       require('./routes/admin'));
 // Handler 404 -----------------------------------------------------------
 // Captura cualquier ruta que no haya sido registrada arriba
 app.use((req, res) => {
