@@ -67,7 +67,7 @@ router.get('/cursos/:id', async (req, res) => {
       FROM curso c
       LEFT JOIN modulo m ON c.id_curso = m.id_curso
       WHERE c.id_curso = $1
-      ORDER BY m.orden;
+      ORDER BY m.id_modulo ASC;
     `;
  
     const result = await query(sql, [id]);
@@ -113,7 +113,7 @@ router.get('/cursos/:id/modulos', async (req, res) => {
       SELECT id_modulo, titulo, descripcion, orden, size_mb, estado
       FROM modulo
       WHERE id_curso = $1 AND estado = 'activo'
-      ORDER BY orden;
+      ORDER BY id_modulo ASC;
     `;
     const result = await query(sql, [req.params.id]);
     res.json(result.rows);

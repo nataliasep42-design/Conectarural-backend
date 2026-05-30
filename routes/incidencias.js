@@ -20,15 +20,15 @@ router.post('/', authenticateToken, async (req, res) => {
   if (asunto.length > 150) {
     return res.status(400).json({ error: 'El asunto no puede superar los 150 caracteres' });
   }
-  const prioridadesValidas = ['baja', 'media', 'alta'];
+  const prioridadesValidas = ['baja', 'normal', 'urgente'];
   if (prioridad && !prioridadesValidas.includes(prioridad)) {
     return res.status(400).json({ error: `prioridad debe ser: ${prioridadesValidas.join(', ')}` });
   }
- 
+
   try {
     const sql = `
       INSERT INTO incidencia (id_usuario, asunto, descripcion, prioridad, tipo_contacto)
-      VALUES ($1, $2, $3, COALESCE($4, 'media'), $5)
+      VALUES ($1, $2, $3, COALESCE($4, 'normal'), $5)
       RETURNING id_incidencia, asunto, estado, prioridad, date_create;
     `;
     const result = await query(sql, [idUsuario, asunto, descripcion, prioridad, tipo_contacto]);
@@ -62,12 +62,12 @@ router.get('/mias', authenticateToken, async (req, res) => {
  
  
 // GET /incidencias/asignadas -------------------------------------
-// Incidencias asignadas a la técnica logueada — técnica o admin
+// Incidencias de las usuarias asignadas a la técnica logueada
 // Filtro opcional: ?estado=abierta | en_proceso | cerrada
 router.get('/asignadas', authenticateToken, requireRol(2, 3), async (req, res) => {
   const { estado } = req.query;
   const params = [req.user.id];
- 
+
   let sql = `
     SELECT i.id_incidencia, i.asunto, i.descripcion, i.prioridad,
            i.estado, i.tipo_contacto, i.date_create,
@@ -75,9 +75,12 @@ router.get('/asignadas', authenticateToken, requireRol(2, 3), async (req, res) =
            u.telefono AS usuaria_telefono, u.zona AS usuaria_zona
     FROM incidencia i
     JOIN usuario u ON i.id_usuario = u.id_usuario
-    WHERE i.id_tecnico = $1
+    WHERE i.id_usuario IN (
+      SELECT id_usuaria FROM asignacion_tecnico_usuaria
+      WHERE id_tecnico = $1 AND estado = 'activa'
+    )
   `;
- 
+
   if (estado) { params.push(estado); sql += ` AND i.estado = $${params.length}`; }
   sql += ' ORDER BY i.date_create DESC;';
  

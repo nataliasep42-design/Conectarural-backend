@@ -4,8 +4,30 @@
 const express = require('express');
 const router  = express.Router();
 const db      = require('../db');
+const path    = require('path');
+const fs      = require('fs');
 const authenticateToken = require('../middleware/authMiddleware');
 const { isAdmin, isAdminOrTecnica } = require('../middleware/isAdmin');
+
+// Multer para subida de vídeos (carga diferida para no romper si no está instalado)
+let upload;
+try {
+  const multer = require('multer');
+  const videoStorage = multer.diskStorage({
+    destination: (req, file, cb) => {
+      const dir = path.join(__dirname, '..', 'uploads', 'videos');
+      fs.mkdirSync(dir, { recursive: true });
+      cb(null, dir);
+    },
+    filename: (req, file, cb) => {
+      const ext = path.extname(file.originalname) || '.mp4';
+      cb(null, `modulo_${req.params.id}_${Date.now()}${ext}`);
+    },
+  });
+  upload = multer({ storage: videoStorage, limits: { fileSize: 500 * 1024 * 1024 } });
+} catch (_) {
+  upload = null;
+}
 
 // ── Aplicar autenticacion a todas las rutas de este router ────────────────
 router.use(authenticateToken);
@@ -299,7 +321,7 @@ router.delete('/asignaciones/:id', isAdmin, async (req, res) => {
 // ═══════════════════════════════════════════════════════════════════════════
 router.get('/incidencias', isAdminOrTecnica, async (req, res) => {
   try {
-    const { estado, prioridad } = req.query;
+    const { estado, prioridad, id_usuaria } = req.query;
 
     let query = `
       SELECT
@@ -331,8 +353,13 @@ router.get('/incidencias', isAdminOrTecnica, async (req, res) => {
       query += ` AND i.prioridad = $${params.length}`;
     }
 
+    if (id_usuaria) {
+      params.push(id_usuaria);
+      query += ` AND i.id_usuario = $${params.length}`;
+    }
+
     query += ` ORDER BY
-      CASE i.prioridad WHEN 'alta' THEN 1 WHEN 'media' THEN 2 ELSE 3 END,
+      CASE i.prioridad WHEN 'urgente' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END,
       i.date_create DESC`;
 
     const { rows } = await db.query(query, params);
@@ -514,5 +541,69 @@ router.delete('/modulos/:id', isAdmin, async (req, res) => {
     res.status(500).json({ error: 'Error al eliminar el modulo' });
   }
 });
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SUBIDA DE VÍDEO — POST /admin/modulos/:id/video
+// ═══════════════════════════════════════════════════════════════════════════
+router.post('/modulos/:id/video', isAdmin, (req, res, next) => {
+  if (!upload) {
+    return res.status(501).json({ error: 'Subida de archivos no disponible. Ejecuta: npm install multer' });
+  }
+  upload.single('video')(req, res, next);
+}, async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: 'No se ha enviado ningún archivo de vídeo' });
+  }
+  try {
+    const url = `/uploads/videos/${req.file.filename}`;
+    const { rows, rowCount } = await db.query(
+      `UPDATE modulo SET url_archivo = $1 WHERE id_modulo = $2 RETURNING *`,
+      [url, req.params.id]
+    );
+    if (rowCount === 0) {
+      fs.unlinkSync(path.join(__dirname, '..', 'uploads', 'videos', req.file.filename));
+      return res.status(404).json({ error: 'Módulo no encontrado' });
+    }
+    res.json({ message: 'Vídeo subido correctamente', url, modulo: rows[0] });
+  } catch (err) {
+    console.error('Error en POST /admin/modulos/:id/video:', err);
+    res.status(500).json({ error: 'Error al subir el vídeo' });
+  }
+});
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// BLOQUEAR / DESBLOQUEAR TÉCNICA
+// PUT /admin/tecnicas/:id/estado   body: { estado: 'activo' | 'bloqueado' | 'inactivo' }
+// Reutiliza la misma lógica que PUT /admin/usuarias/:id
+// ═══════════════════════════════════════════════════════════════════════════
+router.put('/tecnicas/:id/estado', isAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { estado } = req.body;
+
+    const estadosValidos = ['activo', 'inactivo', 'bloqueado'];
+    if (!estado || !estadosValidos.includes(estado)) {
+      return res.status(400).json({ error: `estado debe ser: ${estadosValidos.join(', ')}` });
+    }
+
+    const { rows, rowCount } = await db.query(
+      `UPDATE usuario SET estado = $1 WHERE id_usuario = $2 AND id_rol = 2
+       RETURNING id_usuario, nombre, apellidos, email, estado`,
+      [estado, id]
+    );
+
+    if (rowCount === 0) {
+      return res.status(404).json({ error: 'Técnica no encontrada' });
+    }
+
+    res.json({ message: 'Estado de técnica actualizado', tecnica: rows[0] });
+  } catch (err) {
+    console.error('Error en PUT /admin/tecnicas/:id/estado:', err);
+    res.status(500).json({ error: 'Error al actualizar el estado' });
+  }
+});
+
 
 module.exports = router;

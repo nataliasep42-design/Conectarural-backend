@@ -128,7 +128,7 @@ router.get('/progreso/mis-cursos', authenticateToken, async (req, res) => {
              ON p.id_modulo  = m.id_modulo
             AND p.id_usuario = $1
       WHERE i.id_usuario = $1
-      ORDER BY c.id_curso, m.orden;
+      ORDER BY c.id_curso, m.id_modulo ASC;
     `;
  
     const result = await query(sql, [req.user.id]);

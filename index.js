@@ -1,7 +1,8 @@
 // index.js
- 
+
 const express = require('express');
-const cors = require('cors');
+const cors    = require('cors');
+const path    = require('path');
 const dotenv = require('dotenv');
 const allowedOrigins = [
   'http://localhost:3000',
@@ -37,7 +38,10 @@ app.use(cors({
   credentials: true,
 }));
 app.use(express.json());
- 
+
+// Servir archivos estáticos de uploads (vídeos subidos por el admin)
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
 // Rutas de diagnóstico (solo en desarrollo)--------------------------------
 // En producción estas rutas no existen y no exponen info del servidor
 if (process.env.NODE_ENV !== 'production') {
