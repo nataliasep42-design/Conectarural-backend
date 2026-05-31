@@ -1,10 +1,11 @@
 // routes/incidencias.js
- 
+
 const express = require('express');
 const router = express.Router();
 const { query } = require('../db');
 const authenticateToken = require('../middleware/authMiddleware');
 const requireRol = require('../middleware/roleMiddleware');
+const { sendPush } = require('../fcm_service');
  
  
 // POST /incidencias --------------------------------------------
@@ -26,9 +27,13 @@ router.post('/', authenticateToken, async (req, res) => {
   }
 
   try {
+    // Auto-asignar la técnica activa de la usuaria al crear la consulta
     const sql = `
-      INSERT INTO incidencia (id_usuario, asunto, descripcion, prioridad, tipo_contacto)
-      VALUES ($1, $2, $3, COALESCE($4, 'normal'), $5)
+      INSERT INTO incidencia (id_usuario, asunto, descripcion, prioridad, tipo_contacto, id_tecnico)
+      VALUES ($1, $2, $3, COALESCE($4, 'normal'), $5,
+        (SELECT id_tecnico FROM asignacion_tecnico_usuaria
+         WHERE id_usuaria = $1 AND estado = 'activa'
+         ORDER BY fecha DESC LIMIT 1))
       RETURNING id_incidencia, asunto, estado, prioridad, date_create;
     `;
     const result = await query(sql, [idUsuario, asunto, descripcion, prioridad, tipo_contacto]);
@@ -95,7 +100,7 @@ router.get('/asignadas', authenticateToken, requireRol(2, 3), async (req, res) =
  
  
 // PUT /incidencias/:id -------------------------------------------
-// La técnica asignada o admin pueden cambiar estado y contestar
+// La técnica asignada o admin pueden cambiar estado, contestar o añadir respuesta sin cerrar
 router.put('/:id', authenticateToken, requireRol(2, 3), async (req, res) => {
   const { estado, descripcion, respuesta } = req.body;
 
@@ -132,7 +137,26 @@ router.put('/:id', authenticateToken, requireRol(2, 3), async (req, res) => {
         error: 'Incidencia no encontrada o no tienes permisos para modificarla'
       });
 
-    res.json({ message: 'Incidencia actualizada', incidencia: result.rows[0] });
+    const incidencia = result.rows[0];
+
+    // Notificación push a la usuaria si se añadió respuesta
+    if (respuesta) {
+      const tokenResult = await query(
+        `SELECT fcm_token FROM usuario WHERE id_usuario = $1`,
+        [incidencia.id_usuario]
+      );
+      const fcmToken = tokenResult.rows[0]?.fcm_token;
+      if (fcmToken) {
+        await sendPush(
+          fcmToken,
+          'Tu técnica ha respondido',
+          `Consulta: ${incidencia.asunto}`,
+          { id_incidencia: String(incidencia.id_incidencia), tipo: 'respuesta' }
+        );
+      }
+    }
+
+    res.json({ message: 'Incidencia actualizada', incidencia });
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Error al actualizar la incidencia' });

@@ -24,17 +24,18 @@ router.get('/cursos', async (req, res) => {
   // que redeclaraba la variable y descartaba todos los filtros y la paginación.
   // Ahora hay una sola variable sql que se construye dinámicamente.
   let sql = `
-    SELECT id_curso, titulo, descripcion, categoria, nivel, duracion, descargable
-    FROM curso
-    WHERE estado = 'activo'
+    SELECT c.id_curso, c.titulo, c.descripcion, c.categoria, c.nivel, c.duracion, c.descargable,
+           COALESCE(COUNT(m.id_modulo), 0)::int AS total_modulos
+    FROM curso c
+    LEFT JOIN modulo m ON c.id_curso = m.id_curso AND m.estado = 'activo'
+    WHERE c.estado = 'activo'
   `;
  
-  if (categoria) { params.push(categoria); sql += ` AND categoria = $${params.length}`; }
-  if (nivel)     { params.push(nivel);     sql += ` AND nivel = $${params.length}`; }
- 
-  // CORRECCIÓN: se usan backticks (template literal) para que los índices
-  // se calculen bien, y se añade espacio antes de ORDER BY
-  sql += ` ORDER BY titulo LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+  if (categoria) { params.push(categoria); sql += ` AND c.categoria = $${params.length}`; }
+  if (nivel)     { params.push(nivel);     sql += ` AND c.nivel = $${params.length}`; }
+
+  sql += ` GROUP BY c.id_curso, c.titulo, c.descripcion, c.categoria, c.nivel, c.duracion, c.descargable`;
+  sql += ` ORDER BY c.titulo LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
   params.push(limitInt, offset);
  
   try {

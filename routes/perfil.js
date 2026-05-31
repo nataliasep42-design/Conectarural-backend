@@ -49,7 +49,7 @@ router.put('/perfil', authenticateToken, async (req, res) => {
       SET telefono = COALESCE($1, telefono),
           zona     = COALESCE($2, zona)
       WHERE id_usuario = $3
-      RETURNING id_usuario, nombre, apellidos, email, telefono, zona;
+      RETURNING id_usuario, nombre, apellidos, email, telefono, zona, id_rol;
     `;
     const result = await query(sql, [telefono, zona, req.user.id]);
  

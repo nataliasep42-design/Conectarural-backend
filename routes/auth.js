@@ -117,4 +117,51 @@ router.post('/login', async (req, res) => {
   }
 });
  
+
+// POST /auth/refresh ---------------------------------------------------
+// Renueva el JWT de la sesión activa sin volver a pedir contraseña.
+// Solo requiere un token válido en el header Authorization.
+const authenticateToken = require('../middleware/authMiddleware');
+
+router.post('/refresh', authenticateToken, async (req, res) => {
+  try {
+    const newToken = jwt.sign(
+      { id: req.user.id, rol: req.user.rol },
+      process.env.JWT_SECRET || 'tu_secreto_muy_seguro',
+      { expiresIn: '7d' }
+    );
+    res.json({ token: newToken, message: 'Token renovado' });
+  } catch (error) {
+    console.error('Error al renovar token:', error);
+    res.status(500).json({ error: 'Error al renovar el token' });
+  }
+});
+
+// POST /auth/verify-password ------------------------------------------
+// Verifica la contraseña del usuario autenticado (para confirmar acciones sensibles).
+// Requiere JWT válido. Devuelve { ok: true } si la contraseña coincide.
+router.post('/verify-password', authenticateToken, async (req, res) => {
+  const { password } = req.body;
+  if (!password) {
+    return res.status(400).json({ error: 'Se requiere el campo password' });
+  }
+  try {
+    const result = await query(
+      'SELECT pass_hash FROM usuario WHERE id_usuario = $1',
+      [req.user.id]
+    );
+    if (!result.rows[0]) {
+      return res.status(404).json({ error: 'Usuario no encontrado' });
+    }
+    const valid = await bcrypt.compare(password, result.rows[0].pass_hash);
+    if (!valid) {
+      return res.status(401).json({ error: 'Contraseña incorrecta' });
+    }
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('Error en verify-password:', error);
+    res.status(500).json({ error: 'Error al verificar la contraseña' });
+  }
+});
+
 module.exports = router;

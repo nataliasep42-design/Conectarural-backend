@@ -8,6 +8,7 @@ const path    = require('path');
 const fs      = require('fs');
 const authenticateToken = require('../middleware/authMiddleware');
 const { isAdmin, isAdminOrTecnica } = require('../middleware/isAdmin');
+const { logAdmin } = require('../utils/logAdmin');
 
 // Multer para subida de vídeos (carga diferida para no romper si no está instalado)
 let upload;
@@ -24,7 +25,24 @@ try {
       cb(null, `modulo_${req.params.id}_${Date.now()}${ext}`);
     },
   });
-  upload = multer({ storage: videoStorage, limits: { fileSize: 500 * 1024 * 1024 } });
+  // Tipos de archivo permitidos en módulos (vídeo + documentos + imágenes)
+  const ALLOWED_VIDEO_EXTS = ['.mp4', '.mov', '.avi', '.webm', '.mkv', '.m4v'];
+  const ALLOWED_VIDEO_MIMES = ['video/mp4', 'video/quicktime', 'video/avi',
+    'video/webm', 'video/x-matroska', 'video/x-msvideo', 'application/octet-stream'];
+
+  const videoFilter = (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (!ALLOWED_VIDEO_EXTS.includes(ext)) {
+      return cb(new Error(`Formato no permitido. Usa: ${ALLOWED_VIDEO_EXTS.join(', ')}`));
+    }
+    cb(null, true);
+  };
+
+  upload = multer({
+    storage: videoStorage,
+    limits: { fileSize: 500 * 1024 * 1024 },
+    fileFilter: videoFilter,
+  });
 } catch (_) {
   upload = null;
 }
@@ -139,8 +157,8 @@ router.put('/usuarias/:id', isAdmin, async (req, res) => {
 
     if (id_rol !== undefined) {
       const rolInt = parseInt(id_rol);
-      if (![1, 2].includes(rolInt)) {
-        return res.status(400).json({ error: 'id_rol debe ser 1 (usuaria) o 2 (tecnica)' });
+      if (![1, 2, 3].includes(rolInt)) {
+        return res.status(400).json({ error: 'id_rol debe ser 1 (usuaria), 2 (tecnica) o 3 (admin)' });
       }
     }
 
@@ -171,6 +189,13 @@ router.put('/usuarias/:id', isAdmin, async (req, res) => {
     if (rowCount === 0) {
       return res.status(404).json({ error: 'Usuario no encontrado' });
     }
+
+    // Auditoría
+    const detalle = [
+      id_rol !== undefined ? `rol→${id_rol}` : null,
+      estado ? `estado→${estado}` : null
+    ].filter(Boolean).join(', ');
+    await logAdmin(req.user.id, 'actualizar_usuario', 'usuario', parseInt(id), detalle);
 
     res.json({ message: 'Usuario actualizado', usuario: rows[0] });
   } catch (err) {
@@ -285,6 +310,9 @@ router.post('/asignaciones', isAdmin, async (req, res) => {
       [id_tecnica, id_usuario]
     );
 
+    await logAdmin(req.user.id, 'crear_asignacion', 'asignacion', rows[0].id_asignacion,
+      `tecnica:${id_tecnica}→usuaria:${id_usuario}`);
+
     res.status(201).json({
       message: 'Asignacion creada correctamente',
       id_asignacion: rows[0].id_asignacion
@@ -308,6 +336,7 @@ router.delete('/asignaciones/:id', isAdmin, async (req, res) => {
       return res.status(404).json({ error: 'Asignacion no encontrada' });
     }
 
+    await logAdmin(req.user.id, 'eliminar_asignacion', 'asignacion', parseInt(id), null);
     res.json({ message: 'Asignacion eliminada correctamente' });
   } catch (err) {
     console.error('Error en DELETE /admin/asignaciones/:id:', err);
@@ -557,9 +586,10 @@ router.post('/modulos/:id/video', isAdmin, (req, res, next) => {
   }
   try {
     const url = `/uploads/videos/${req.file.filename}`;
+    const sizeMb = parseFloat((req.file.size / (1024 * 1024)).toFixed(2));
     const { rows, rowCount } = await db.query(
-      `UPDATE modulo SET url_archivo = $1 WHERE id_modulo = $2 RETURNING *`,
-      [url, req.params.id]
+      `UPDATE modulo SET url_archivo = $1, size_mb = $2 WHERE id_modulo = $3 RETURNING *`,
+      [url, sizeMb, req.params.id]
     );
     if (rowCount === 0) {
       fs.unlinkSync(path.join(__dirname, '..', 'uploads', 'videos', req.file.filename));
@@ -569,6 +599,138 @@ router.post('/modulos/:id/video', isAdmin, (req, res, next) => {
   } catch (err) {
     console.error('Error en POST /admin/modulos/:id/video:', err);
     res.status(500).json({ error: 'Error al subir el vídeo' });
+  }
+});
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ESTADÍSTICAS AVANZADAS — GET /admin/stats/detalles
+// ═══════════════════════════════════════════════════════════════════════════
+router.get('/stats/detalles', isAdminOrTecnica, async (req, res) => {
+  try {
+    const [cursosPopulares, tasaCompletado, usuariasActivas30d] = await Promise.all([
+      // Top 5 cursos por número de inscripciones
+      db.query(`
+        SELECT c.id_curso, c.titulo,
+               COUNT(i.id_inscripcion)::int AS total_inscritas,
+               COUNT(CASE WHEN p_agg.completado THEN 1 END)::int AS completaron
+        FROM curso c
+        LEFT JOIN inscripcion i ON i.id_curso = c.id_curso
+        LEFT JOIN LATERAL (
+          SELECT bool_and(p.completado) AS completado
+          FROM progreso p
+          JOIN modulo m ON m.id_modulo = p.id_modulo
+          WHERE p.id_usuario = i.id_usuario AND m.id_curso = c.id_curso
+        ) p_agg ON true
+        WHERE c.estado = 'activo'
+        GROUP BY c.id_curso, c.titulo
+        ORDER BY total_inscritas DESC
+        LIMIT 5
+      `),
+      // Tasa global de completado (módulos completados / módulos totales con progreso)
+      db.query(`
+        SELECT
+          COUNT(*)::int AS total_progreso,
+          COUNT(CASE WHEN completado THEN 1 END)::int AS completados,
+          ROUND(
+            100.0 * COUNT(CASE WHEN completado THEN 1 END) / NULLIF(COUNT(*), 0), 1
+          ) AS tasa_completado
+        FROM progreso
+      `),
+      // Usuarias activas en los últimos 30 días (con acceso a contenido)
+      db.query(`
+        SELECT COUNT(DISTINCT p.id_usuario)::int AS usuarias_activas_30d
+        FROM progreso p
+        WHERE p.last_access >= NOW() - INTERVAL '30 days'
+      `),
+    ]);
+
+    res.json({
+      cursos_populares: cursosPopulares.rows,
+      tasa_completado: tasaCompletado.rows[0],
+      usuarias_activas_30d: usuariasActivas30d.rows[0].usuarias_activas_30d,
+    });
+  } catch (err) {
+    console.error('Error en /admin/stats/detalles:', err);
+    res.status(500).json({ error: 'Error al obtener estadísticas avanzadas' });
+  }
+});
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LOG DE AUDITORÍA ADMIN
+// GET /admin/logs?limit=50
+// ═══════════════════════════════════════════════════════════════════════════
+router.get('/logs', isAdmin, async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+    const { rows } = await db.query(`
+      SELECT l.id_log, l.accion, l.entidad, l.id_entidad, l.detalle, l.fecha,
+             u.nombre AS admin_nombre, u.apellidos AS admin_apellidos
+      FROM log_admin l
+      LEFT JOIN usuario u ON l.id_admin = u.id_usuario
+      ORDER BY l.fecha DESC
+      LIMIT $1
+    `, [limit]);
+    res.json(rows);
+  } catch (err) {
+    console.error('Error en GET /admin/logs:', err);
+    res.status(500).json({ error: 'Error al obtener el log de auditoría' });
+  }
+});
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SUBIDA DE DOCUMENTO (PDF, imágenes, presentaciones) — POST /admin/modulos/:id/documento
+// ═══════════════════════════════════════════════════════════════════════════
+router.post('/modulos/:id/documento', isAdmin, (req, res, next) => {
+  if (!upload) {
+    return res.status(501).json({ error: 'Subida de archivos no disponible. Instala multer.' });
+  }
+
+  const docFilter = (req, file, cb) => {
+    const ALLOWED_DOC_EXTS = ['.pdf', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.pptx', '.ppt', '.doc', '.docx'];
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (!ALLOWED_DOC_EXTS.includes(ext)) {
+      return cb(new Error(`Formato no permitido. Usa: ${ALLOWED_DOC_EXTS.join(', ')}`));
+    }
+    cb(null, true);
+  };
+
+  const multer = require('multer');
+  const docStorage = multer.diskStorage({
+    destination: (req, file, cb) => {
+      const dir = path.join(__dirname, '..', 'uploads', 'documentos');
+      fs.mkdirSync(dir, { recursive: true });
+      cb(null, dir);
+    },
+    filename: (req, file, cb) => {
+      const ext = path.extname(file.originalname);
+      cb(null, `modulo_${req.params.id}_${Date.now()}${ext}`);
+    },
+  });
+
+  multer({ storage: docStorage, limits: { fileSize: 50 * 1024 * 1024 }, fileFilter: docFilter })
+    .single('documento')(req, res, next);
+}, async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: 'No se ha enviado ningún archivo' });
+  }
+  try {
+    const url = `/uploads/documentos/${req.file.filename}`;
+    const sizeMb = parseFloat((req.file.size / (1024 * 1024)).toFixed(2));
+    const { rows, rowCount } = await db.query(
+      `UPDATE modulo SET url_archivo = $1, size_mb = $2 WHERE id_modulo = $3 RETURNING *`,
+      [url, sizeMb, req.params.id]
+    );
+    if (rowCount === 0) {
+      fs.unlinkSync(path.join(__dirname, '..', 'uploads', 'documentos', req.file.filename));
+      return res.status(404).json({ error: 'Módulo no encontrado' });
+    }
+    res.json({ message: 'Documento subido correctamente', url, modulo: rows[0] });
+  } catch (err) {
+    console.error('Error en POST /admin/modulos/:id/documento:', err);
+    res.status(500).json({ error: 'Error al subir el documento' });
   }
 });
 
@@ -598,6 +760,7 @@ router.put('/tecnicas/:id/estado', isAdmin, async (req, res) => {
       return res.status(404).json({ error: 'Técnica no encontrada' });
     }
 
+    await logAdmin(req.user.id, 'cambiar_estado_tecnica', 'usuario', parseInt(id), `estado→${estado}`);
     res.json({ message: 'Estado de técnica actualizado', tecnica: rows[0] });
   } catch (err) {
     console.error('Error en PUT /admin/tecnicas/:id/estado:', err);
