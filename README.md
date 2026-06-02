@@ -1,196 +1,317 @@
-# ConectaRural Backend
+# ConectaRural — Backend API
 
-Backend API de **ConectaRural**, desarrollado con Node.js, Express y PostgreSQL como capa intermedia entre la aplicación móvil, la web de gestión y la base de datos del proyecto.
+API REST del proyecto **ConectaRural**, plataforma de alfabetización digital para mujeres rurales. Desarrollada con Node.js, Express 5 y PostgreSQL; da servicio tanto a la aplicación móvil Flutter como al panel de gestión web.
 
-## Descripción
+---
 
-Este backend centraliza la lógica de negocio del sistema y gestiona funcionalidades como autenticación, usuarios y roles, cursos y módulos, progreso, descargas, incidencias, asignaciones entre técnicas y usuarias, y estadísticas básicas.
+## Tecnologías
 
-La API sigue una arquitectura modular y está pensada para servir como punto de unión entre las interfaces cliente y PostgreSQL, evitando el acceso directo a la base de datos desde la app Flutter o futuras interfaces web.
+| Paquete | Versión | Rol |
+|---------|---------|-----|
+| Node.js | ≥ 18 | Runtime |
+| Express | ^5.2.1 | Framework HTTP |
+| pg | ^8.20.0 | Driver PostgreSQL (pool) |
+| jsonwebtoken | ^9.0.3 | Firma y verificación JWT |
+| bcryptjs | ^3.0.3 | Hash de contraseñas |
+| dotenv | ^17.4.2 | Variables de entorno |
+| cors | ^2.8.6 | Cabeceras CORS |
+| express-rate-limit | ^8.5.1 | Rate limiting |
+| multer | ^1.4.5-lts.1 | Subida de archivos (vídeos, documentos) |
+| firebase-admin | ^13.10.0 | Push notifications (FCM) |
+| nodemon | ^3.1.14 | Hot-reload en desarrollo |
+| jest + supertest | ^30.x / ^7.x | Tests de integración |
 
-## Tecnologías utilizadas
+---
 
-- Node.js.
-- Express.
-- PostgreSQL.
-- `pg` para la conexión con la base de datos.
-- `dotenv` para variables de entorno.
-- `cors` para permitir peticiones desde clientes externos durante el desarrollo.
-- `bcryptjs` para el hash de contraseñas.
-- `jsonwebtoken` para autenticación basada en JWT.
-- `nodemon` para ejecución en desarrollo con reinicio automático.
-  
-## Estructura orientativa del proyecto
+## Estructura del proyecto
 
-```bash
+```
 conectarural-backend/
-├── index.js
-├── db.js
+├── index.js                  ← Arranque, middlewares globales, registro de rutas
+├── db.js                     ← Pool de conexiones PostgreSQL
+├── fcm_service.js            ← Firebase Admin SDK — envío de push notifications
 ├── package.json
-├── .env.example
-├── .gitignore
+├── .env                      ← Variables de entorno (no subir a Git)
 ├── middleware/
-│   ├── AuthMiddleware.js
-│   └── RoleMiddleware.js
+│   ├── authMiddleware.js     ← Verifica JWT → adjunta req.user = { id, rol }
+│   └── roleMiddleware.js     ← requireRol(...roles) → 403 si rol insuficiente
 ├── routes/
-│   └── routes.js
-└── sql/
-    └── schema.sql
+│   ├── admin.js              ← CRUD admin: usuarios, cursos, módulos, asignaciones, incidencias, logs
+│   ├── auth.js               ← register, login, refresh, verify-password
+│   ├── asignaciones.js       ← /tecnicos, /asignaciones, /mi-tecnico
+│   ├── cursos.js             ← Catálogo público de cursos y módulos
+│   ├── descargas.js          ← Registro de descargas offline
+│   ├── fcm_tokens.js         ← POST/DELETE /fcm-token
+│   ├── incidencias.js        ← CRUD incidencias (usuaria + técnica)
+│   ├── inscripciones.js      ← Inscripción y progreso de cursos
+│   ├── perfil.js             ← GET/PUT /perfil
+│   ├── stats.js              ← GET /stats/resumen (solo admin)
+│   └── usuarios.js           ← Listado y ficha de usuarios (solo admin)
+└── uploads/
+    ├── videos/               ← Vídeos subidos por el admin (max 500 MB)
+    └── documentos/           ← PDFs, imágenes, presentaciones (max 50 MB)
 ```
 
-La memoria del proyecto describe una versión final del backend organizada en torno a un archivo de arranque (`index.js`), un módulo de conexión con PostgreSQL (`db.js`), middlewares de autenticación y autorización por rol, y rutas agrupadas por dominio funcional.
+---
 
 ## Requisitos previos
 
-Antes de ejecutar el proyecto, es necesario tener instalado lo siguiente:
+- Node.js ≥ 18 y npm
+- PostgreSQL ≥ 14
+- (Opcional) Cuenta de Firebase con FCM habilitado para notificaciones push
 
-- Node.js y npm. [file:2]
-- PostgreSQL. [file:2]
-- Un editor como Visual Studio Code y, opcionalmente, Postman para probar endpoints.
+---
 
 ## Instalación
 
-1. Clonar el repositorio:
-
 ```bash
-git clone https://github.com/TU-USUARIO/Conectarural-backend.git
-cd Conectarural-backend
-```
-
-2. Instalar dependencias:
-
-```bash
+git clone https://github.com/TU-USUARIO/conectarural-backend.git
+cd conectarural-backend
 npm install
 ```
 
-La configuración base descrita en la memoria parte de `npm init -y` y de la instalación de `express`, `pg`, `cors`, `dotenv` y `nodemon`, ampliándose después con librerías de autenticación como `bcryptjs` y `jsonwebtoken`.
+---
 
 ## Variables de entorno
 
-Crear un archivo `.env` en la raíz del proyecto con una estructura similar a esta:
+Crea un archivo `.env` en la raíz con las siguientes variables:
 
 ```env
+# Servidor
 PORT=3000
+NODE_ENV=development          # "production" desactiva /health y /test-db
+
+# PostgreSQL
 PGHOST=localhost
 PGPORT=5432
-PGDATABASE=conectaruraldb
-PGUSER=conectaruraluser
+PGDATABASE=conectarural_db
+PGUSER=conectarural_user
 PGPASSWORD=tu_password_aqui
-JWTSECRET=tu_clave_jwt_aqui
-NODE_ENV=development
+
+# Autenticación — OBLIGATORIA, el servidor no arranca sin ella
+JWT_SECRET=clave_secreta_minimo_32_caracteres
+
+# Firebase Cloud Messaging (opcional — para notificaciones push)
+# Pega aquí el JSON completo de la cuenta de servicio de Firebase Admin SDK
+FCM_SERVICE_ACCOUNT_JSON='{"type":"service_account","project_id":"...","private_key":"...","client_email":"..."}'
 ```
 
-La memoria indica que el backend usa un archivo `.env` para almacenar el puerto de escucha y los datos de conexión a PostgreSQL, así como la clave secreta utilizada para firmar los JWT.
+> **Importante:** nunca subas `.env` a Git. El servidor termina con error si `JWT_SECRET` no está definido.
+
+---
 
 ## Scripts
 
-En `package.json` se recomienda incluir al menos estos scripts:
-
-```json
-{
-  "scripts": {
-    "dev": "nodemon index.js",
-    "start": "node index.js"
-  }
-}
+```bash
+npm run dev        # Desarrollo: nodemon con hot-reload (NODE_ENV=development)
+npm start          # Producción: node index.js (NODE_ENV=production)
+npm test           # Tests con Jest (NODE_ENV=test)
+npm run test:watch # Tests en modo watch
 ```
 
-Según la documentación del proyecto, `npm run dev` arranca el servidor en modo desarrollo con `nodemon`, mientras que `npm start` lo ejecuta de forma normal.
+---
 
 ## Puesta en marcha
 
-1. Asegurarse de que PostgreSQL está arrancado y que la base de datos del proyecto existe.
-2. Configurar correctamente el archivo `.env`.
-3. Iniciar el servidor:
+1. Asegúrate de que PostgreSQL está corriendo y la base de datos existe.
+2. Configura el archivo `.env` correctamente.
+3. Inicia el servidor en modo desarrollo:
 
 ```bash
 npm run dev
 ```
 
-Si todo está bien configurado, la API quedará escuchando en una dirección local similar a:
+El servidor queda escuchando en `http://localhost:3000`.
 
-```bash
-http://localhost:3000
+En modo desarrollo puedes verificar el estado con:
+- `GET /health` → `{ status: "ok" }`
+- `GET /test-db` → `{ db: "ok", now: "..." }`
+
+---
+
+## Sistema de roles
+
+| Rol | ID | Descripción |
+|-----|----|-------------|
+| usuaria | 1 | Usuaria rural — acceso a cursos, progreso, incidencias |
+| técnica | 2 | Técnica de apoyo — gestiona consultas, ve sus usuarias |
+| admin | 3 | Administradora — acceso completo al panel de gestión |
+
+El registro público siempre crea usuarias con rol 1. Los roles 2 y 3 se asignan desde el panel de administración.
+
+---
+
+## Referencia de endpoints
+
+Todas las rutas protegidas requieren la cabecera:
+```
+Authorization: Bearer <token>
 ```
 
-La memoria incluye también rutas de comprobación inicial como `/health` para verificar que el servidor responde y `/test-db` para validar la conexión con PostgreSQL. 
+### Autenticación — `/auth`
 
-## Funcionalidades principales
+| Verbo | Ruta | Auth | Descripción |
+|-------|------|------|-------------|
+| POST | `/auth/register` | — | Registrar nueva usuaria (rol 1 siempre) |
+| POST | `/auth/login` | — | Login — devuelve JWT (7 días) |
+| POST | `/auth/refresh` | JWT | Renovar token sin contraseña |
+| POST | `/auth/verify-password` | JWT | Verificar contraseña actual (para acciones sensibles) |
 
-Este backend está diseñado para cubrir, al menos, los siguientes bloques funcionales:
+### Perfil — `/perfil`
 
-- Registro e inicio de sesión de usuarias.
-- Generación y validación de tokens JWT.
-- Gestión de perfiles y control de acceso por rol.
-- Consulta de cursos y detalle de módulos.
-- Inscripciones, progreso y seguimiento del aprendizaje.
-- Gestión de descargas para uso offline.
-- Creación y seguimiento de incidencias de soporte.
-- Asignación entre técnicas y usuarias.
-- Estadísticas y resumen básico de actividad.
+| Verbo | Ruta | Rol | Descripción |
+|-------|------|-----|-------------|
+| GET | `/perfil` | 1,2,3 | Ver datos propios |
+| PUT | `/perfil` | 1,2,3 | Actualizar teléfono y zona |
 
-## Endpoints orientativos
+### Cursos y módulos
 
-Los nombres exactos pueden variar según la versión del proyecto, pero la memoria describe rutas asociadas a estos dominios funcionales:
+| Verbo | Ruta | Rol | Descripción |
+|-------|------|-----|-------------|
+| GET | `/cursos` | — | Catálogo público con paginación |
+| GET | `/cursos/:id` | — | Detalle de curso con módulos |
+| GET | `/cursos/:id/modulos` | — | Módulos activos de un curso |
+| POST | `/cursos/:id/inscribirse` | 1,2,3 | Inscribirse en un curso |
+| GET | `/mis-cursos` | 1,2,3 | Cursos en los que está inscrita |
+| POST | `/modulos/:id/progreso` | 1,2,3 | Guardar progreso en un módulo (0–100 %) |
+| GET | `/progreso/mis-cursos` | 1,2,3 | Progreso agrupado por curso |
 
-| Área | Ejemplos de endpoints |
-|------|------------------------|
-| Salud del sistema | `GET /health`, `GET /test-db` |
-| Autenticación | `POST /auth/register`, `POST /auth/login` |
-| Cursos | `GET /cursos`, `GET /cursos/:id` |
-| Perfil | `GET /perfil`, `PUT /perfil` |
-| Progreso | `GET /progreso`, `POST /modulos/:id/progreso` |
-| Descargas | `GET /descargas`, `POST /modulos/:id/descargas` |
-| Incidencias | `POST /incidencias`, `GET /incidencias` |
-| Asignaciones | `GET /asignaciones` |
-| Estadísticas | `GET /stats/resumen` |
+### Descargas offline
 
-## Autenticación y seguridad
+| Verbo | Ruta | Rol | Descripción |
+|-------|------|-----|-------------|
+| POST | `/modulos/:id/descargas` | 1,2,3 | Registrar módulo como descargado |
+| GET | `/mis-descargas` | 1,2,3 | Módulos descargados con metadatos |
+| DELETE | `/modulos/:id/descargas` | 1,2,3 | Eliminar registro de descarga |
 
-El sistema utiliza autenticación con JWT. Tras un login correcto, el servidor genera un token firmado que la aplicación cliente debe enviar en la cabecera `Authorization` con el formato `Bearer <token>` para acceder a rutas protegidas.
+### Incidencias / Consultas
 
-Las contraseñas no se almacenan en texto plano, sino hasheadas mediante `bcryptjs`, y las rutas privadas pueden protegerse mediante middlewares de autenticación y autorización por rol.
+| Verbo | Ruta | Rol | Descripción |
+|-------|------|-----|-------------|
+| POST | `/incidencias` | 1,2,3 | Crear consulta (auto-asigna técnica activa) |
+| GET | `/incidencias/mias` | 1,2,3 | Mis consultas enviadas |
+| GET | `/incidencias/asignadas` | 2,3 | Consultas de mis usuarias asignadas |
+| PUT | `/incidencias/:id` | 2,3 | Responder o cambiar estado |
+
+### Asignaciones
+
+| Verbo | Ruta | Rol | Descripción |
+|-------|------|-----|-------------|
+| GET | `/mi-tecnico` | 1,2,3 | Técnica de apoyo asignada |
+| GET | `/asignaciones/tecnico/:id` | 2,3 | Usuarias asignadas a una técnica |
+
+### Estadísticas
+
+| Verbo | Ruta | Rol | Descripción |
+|-------|------|-----|-------------|
+| GET | `/stats/resumen` | 3 | Resumen filtrable por zona y fechas |
+
+### Notificaciones push
+
+| Verbo | Ruta | Rol | Descripción |
+|-------|------|-----|-------------|
+| POST | `/fcm-token` | 1,2,3 | Registrar token FCM del dispositivo |
+| DELETE | `/fcm-token` | 1,2,3 | Eliminar token (logout) |
+
+### Panel de administración — `/admin`
+
+Todos los endpoints admin requieren `Authorization: Bearer <token>` con `rol = 3`, salvo los marcados con `2,3`.
+
+| Verbo | Ruta | Rol | Descripción |
+|-------|------|-----|-------------|
+| GET | `/admin/stats` | 2,3 | Estadísticas generales del sistema |
+| GET | `/admin/usuarias` | 2,3 | Listar usuarias con filtros |
+| PUT | `/admin/usuarias/:id` | 3 | Cambiar rol o estado de una usuaria |
+| GET | `/admin/tecnicas` | 2,3 | Listar técnicas |
+| PUT | `/admin/tecnicas/:id/estado` | 3 | Activar o bloquear técnica |
+| GET | `/admin/asignaciones` | 2,3 | Ver todas las asignaciones |
+| POST | `/admin/asignaciones` | 3 | Crear asignación técnica ↔ usuaria |
+| DELETE | `/admin/asignaciones/:id` | 3 | Eliminar asignación |
+| GET | `/admin/incidencias` | 2,3 | Ver todas las incidencias del sistema |
+| PUT | `/admin/incidencias/:id` | 2,3 | Responder o cambiar estado |
+| POST | `/admin/cursos` | 3 | Crear curso |
+| PUT | `/admin/cursos/:id` | 3 | Editar curso |
+| DELETE | `/admin/cursos/:id` | 3 | Eliminar curso (cascade total) |
+| POST | `/cursos/:id/modulos` | 3 | Crear módulo |
+| PUT | `/modulos/:id` | 3 | Editar o reordenar módulo |
+| DELETE | `/admin/modulos/:id` | 3 | Eliminar módulo |
+| POST | `/admin/modulos/:id/video` | 3 | Subir vídeo (multipart, max 500 MB) |
+| POST | `/admin/modulos/:id/documento` | 3 | Subir PDF/imagen/presentación (max 50 MB) |
+| GET | `/admin/logs` | 3 | Registro de auditoría con paginación |
+
+---
 
 ## Base de datos
 
-La API se conecta a una base de datos PostgreSQL diseñada para gestionar entidades como roles, usuarios, cursos, módulos, inscripciones, progreso, descargas, incidencias y asignaciones entre técnicas y usuarias. 
+Esquema principal de tablas:
 
-La memoria también indica el uso de claves primarias, claves foráneas, restricciones `UNIQUE`, relaciones 1-N, tablas de soporte para progreso y descargas, e índices para optimizar consultas frecuentes.
+```
+usuario          — id_usuario, nombre, apellidos, email, pass_hash,
+                   id_rol, estado, fecha_alta, fcm_token
+rol              — id_rol (1=usuaria, 2=tecnica, 3=admin), nombre_rol
+curso            — id_curso, titulo, descripcion, categoria, nivel, duracion, descargable
+modulo           — id_modulo, id_curso, titulo, descripcion, orden, url_archivo, size_mb, updated_at
+inscripcion      — id_usuario, id_curso, fecha, estado  [UNIQUE(id_usuario, id_curso)]
+progreso         — id_usuario, id_modulo, porcentaje, completado, last_access  [PK compuesto]
+descarga         — id_usuario, id_modulo, fecha_desc, estado_desc, size_desc   [UNIQUE]
+asignacion_tecnico_usuaria — id_asignacion, id_tecnico, id_usuaria, fecha, estado, notas
+incidencia       — id_incidencia, id_usuario, id_tecnico, asunto, descripcion,
+                   respuesta, prioridad, estado, tipo_contacto, date_create
+log_admin        — id_log, id_admin, accion, entidad, id_entidad, detalle, fecha
+```
 
-## Pruebas
+---
 
-Para validar el backend de forma aislada, se recomienda utilizar Postman antes de integrarlo con la app Flutter o con la web de gestión.
+## Seguridad
 
-Una secuencia mínima de prueba sería:
+- **JWT**: tokens de 7 días firmados con `JWT_SECRET`. El servidor termina si la variable no está definida.
+- **Contraseñas**: hasheadas con `bcryptjs` (salt rounds = 10), nunca almacenadas en texto plano.
+- **Rate limiting**: `/auth` limitado a 10 req/15 min por IP; resto de endpoints a 300 req/15 min.
+- **Roles**: cada ruta declara explícitamente qué roles pueden acceder vía `requireRol(...)`.
+- **SQL injection**: todas las queries usan prepared statements (`$1`, `$2`, …); sin concatenación de strings con valores de usuario.
+- **Archivos subidos**: servidos con `express.static` desde `/uploads`. En producción se recomienda añadir autenticación o servir desde un CDN con tokens firmados.
 
-1. Comprobar `GET /health`.
-2. Comprobar `GET /test-db`.
-3. Registrar una usuaria con `POST /auth/register`.
-4. Iniciar sesión con `POST /auth/login`.
-5. Usar el token recibido para probar rutas protegidas.
+---
 
-## Git y buenas prácticas
+## Notificaciones push (FCM)
 
-Para publicar el proyecto en GitHub sin exponer información sensible, conviene incluir este `.gitignore`:
+Si `FCM_SERVICE_ACCOUNT_JSON` está definido, el backend envía notificaciones push automáticamente en estos eventos:
+
+- Nueva consulta creada → notificación a la técnica asignada
+- Técnica responde una consulta → notificación a la usuaria
+
+Los fallos de FCM no interrumpen el flujo de la petición.
+
+---
+
+## Tests
+
+```bash
+npm test
+```
+
+Los tests usan Jest + Supertest contra una base de datos de prueba (`NODE_ENV=test`). Se ejecutan en serie (`--runInBand`) para evitar condiciones de carrera.
+
+---
+
+## .gitignore recomendado
 
 ```gitignore
-node_modules
+node_modules/
 .env
+uploads/
 *.log
 npm-debug.log*
-.vscode
-.idea
+.vscode/
 .DS_Store
 Thumbs.db
 ```
 
-No debe subirse nunca el archivo `.env`, ya que contiene credenciales de base de datos y la clave secreta de JWT.
+> Los archivos subidos (`uploads/`) tampoco deben subirse al repositorio si se usa almacenamiento local.
 
-## Estado del proyecto
+---
 
-Este repositorio documenta la primera versión funcional del backend de ConectaRural, alineada con los apartados de base de datos y backend desarrollados en la memoria del proyecto final.
+## Autoras
 
-## Autora
-
-**Natalia Betancur y Natalia Reguilon**  
-Proyecto Final de Ciclo — Sistemas de Telecomunicaciones e Informáticos.
+**Natalia Betancur · Natalia Reguillón**  
+Proyecto Final de Ciclo — Desarrollo de Aplicaciones Multiplataforma  
