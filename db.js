@@ -7,15 +7,20 @@ const dotenv = require('dotenv');
 // Carga las variables de entorno desde el archivo .env
 dotenv.config();
 
-// Crea un pool de conexiones a PostgreSQL usando los datos de .env
-const pool = new Pool({
-  host: process.env.PGHOST,
-  port: process.env.PGPORT,
-  database: process.env.PGDATABASE,
-  user: process.env.PGUSER,
-  password: process.env.PGPASSWORD,
-  client_encoding: 'UTF8',
-});
+// En producción Render provee DATABASE_URL; en local se usan las vars PG* del .env
+const pool = process.env.DATABASE_URL
+  ? new Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl: { rejectUnauthorized: false },
+    })
+  : new Pool({
+      host: process.env.PGHOST,
+      port: process.env.PGPORT,
+      database: process.env.PGDATABASE,
+      user: process.env.PGUSER,
+      password: process.env.PGPASSWORD,
+      client_encoding: 'UTF8',
+    });
 
 pool.on('error', (err) => {
   console.error('Error inesperado en el pool de PostgreSQL:', err);

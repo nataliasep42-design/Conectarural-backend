@@ -19,7 +19,8 @@ const allowedOrigins = [
   'http://localhost:3000',
   'http://localhost:5173',
   'http://localhost:8080',
-  /^http:\/\/localhost:\d+$/,  // permite CUALQUIER puerto localhost
+  /^http:\/\/localhost:\d+$/,
+  ...(process.env.ALLOWED_ORIGIN ? [process.env.ALLOWED_ORIGIN] : []),
 ];
  
 const app = express();
@@ -61,15 +62,14 @@ app.use(globalLimiter);
 // Servir archivos estáticos de uploads (vídeos subidos por el admin)
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// Rutas de diagnóstico (solo en desarrollo)--------------------------------
-// En producción estas rutas no existen y no exponen info del servidor
+// Health check — disponible en todos los entornos (Render lo usa para saber si el servicio arrancó)
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok' });
+});
+
+// Diagnóstico de BD (solo en desarrollo)
 if (process.env.NODE_ENV !== 'production') {
   const { query } = require('./db');
- 
-  app.get('/health', (req, res) => {
-    res.json({ status: 'ok', message: 'ConectaRural API funcionando' });
-  });
- 
   app.get('/test-db', async (req, res) => {
     try {
       const result = await query('SELECT NOW() AS now');
@@ -109,6 +109,6 @@ app.use((err, req, res, next) => {
  
 // Arrancar servidor --------------------------------------------------------
 app.listen(PORT, () => {
-  console.log(`ConectaRural API escuchando en http://localhost:${PORT}`);
+  console.log(`ConectaRural API escuchando en el puerto ${PORT}`);
   console.log(`Entorno: ${process.env.NODE_ENV || 'development'}`);
 });
