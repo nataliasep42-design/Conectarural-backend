@@ -63,26 +63,29 @@ router.get('/cursos/:id', async (req, res) => {
     const sql = `
       SELECT
         c.id_curso, c.titulo AS curso_titulo, c.descripcion AS curso_desc,
-        c.duracion, c.descargable,
-        m.id_modulo, m.titulo AS modulo_titulo, m.orden, m.size_mb, m.url_archivo
+        c.duracion, c.descargable, c.categoria, c.nivel,
+        m.id_modulo, m.titulo AS modulo_titulo, m.orden, m.size_mb, m.url_archivo,
+        m.updated_at AS modulo_updated_at
       FROM curso c
       LEFT JOIN modulo m ON c.id_curso = m.id_curso
       WHERE c.id_curso = $1
-      ORDER BY m.id_modulo ASC;
+      ORDER BY m.orden ASC NULLS LAST;
     `;
- 
+
     const result = await query(sql, [id]);
- 
+
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Curso no encontrado' });
     }
- 
+
     const curso = {
       id_curso:    result.rows[0].id_curso,
       titulo:      result.rows[0].curso_titulo,
       descripcion: result.rows[0].curso_desc,
       duracion:    result.rows[0].duracion,
       descargable: result.rows[0].descargable,
+      categoria:   result.rows[0].categoria,
+      nivel:       result.rows[0].nivel,
       modulos: result.rows
         .filter(row => row.id_modulo !== null)
         .map(row => ({
@@ -90,7 +93,8 @@ router.get('/cursos/:id', async (req, res) => {
           titulo:      row.modulo_titulo,
           orden:       row.orden,
           size_mb:     row.size_mb,
-          url_archivo: row.url_archivo
+          url_archivo: row.url_archivo,
+          updated_at:  row.modulo_updated_at,
         }))
     };
  

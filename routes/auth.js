@@ -98,7 +98,7 @@ router.post('/login', async (req, res) => {
     // cada hora mientras se usa la app
     const token = jwt.sign(
       { id: user.id_usuario, rol: user.id_rol },
-      process.env.JWT_SECRET || 'tu_secreto_muy_seguro',
+      process.env.JWT_SECRET,
       { expiresIn: '7d' }
     );
  
@@ -108,7 +108,8 @@ router.post('/login', async (req, res) => {
       user: {
         id:     user.id_usuario,
         nombre: user.nombre,
-        rol:    user.id_rol      // Flutter lo necesita para mostrar la vista correcta
+        email:  user.email,
+        rol:    user.id_rol
       }
     });
   } catch (error) {
@@ -127,7 +128,7 @@ router.post('/refresh', authenticateToken, async (req, res) => {
   try {
     const newToken = jwt.sign(
       { id: req.user.id, rol: req.user.rol },
-      process.env.JWT_SECRET || 'tu_secreto_muy_seguro',
+      process.env.JWT_SECRET,
       { expiresIn: '7d' }
     );
     res.json({ token: newToken, message: 'Token renovado' });

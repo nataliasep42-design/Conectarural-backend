@@ -15,7 +15,7 @@ function authenticateToken(req, res, next) {
     // 2. Verificar token con la clave del .env
     // Se accede en tiempo de ejecución (no en carga del módulo) para
     // garantizar que dotenv ya ha cargado las variables
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'tu_secreto_muy_seguro');
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
  
     // 3. Adjuntar payload al request: { id, rol }
     req.user = decoded;

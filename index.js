@@ -8,23 +8,12 @@ const dotenv = require('dotenv');
 // Carga variables de entorno antes de cualquier otra cosa
 dotenv.config();
 
-// Sentry: monitorización de errores — activar con SENTRY_DSN en .env
-// Si no hay DSN, la app sigue funcionando sin monitorización.
-let Sentry = null;
-if (process.env.SENTRY_DSN) {
-  try {
-    Sentry = require('@sentry/node');
-    Sentry.init({
-      dsn: process.env.SENTRY_DSN,
-      tracesSampleRate: 0.1,
-      environment: process.env.NODE_ENV || 'development',
-    });
-    console.log('Sentry inicializado correctamente');
-  } catch (e) {
-    console.warn('Sentry no pudo inicializarse (opcional):', e.message);
-    Sentry = null;
-  }
+// Validar variables críticas al arrancar — falla rápido y con mensaje claro
+if (!process.env.JWT_SECRET) {
+  console.error('FATAL: JWT_SECRET no está definido en .env. Deteniéndose.');
+  process.exit(1);
 }
+
 
 const allowedOrigins = [
   'http://localhost:3000',
@@ -58,6 +47,17 @@ app.use(cors({
 }));
 app.use(express.json());
 
+// Rate limit global: máx 300 peticiones/15 min por IP (protege todos los endpoints)
+const globalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 300,
+  message: { error: 'Demasiadas peticiones. Inténtalo de nuevo más tarde.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use(globalLimiter);
+
+
 // Servir archivos estáticos de uploads (vídeos subidos por el admin)
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
@@ -83,7 +83,7 @@ if (process.env.NODE_ENV !== 'production') {
 
  
 // Rutas-----------------------------------------------------------------
-app.use('/auth',        require('./routes/auth'));
+app.use('/auth',        authLimiter, require('./routes/auth'));
 app.use('/',            require('./routes/perfil'));
 app.use('/usuarios',    require('./routes/usuarios'));
 app.use('/',            require('./routes/cursos'));
@@ -100,11 +100,6 @@ app.use((req, res) => {
   res.status(404).json({ error: `Ruta ${req.method} ${req.path} no encontrada` });
 });
  
-// Handler de errores Sentry (debe ir antes del handler personalizado)
-if (Sentry) {
-  app.use(Sentry.expressErrorHandler());
-}
-
 // Handler global de errores ----------------------------------------------
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {

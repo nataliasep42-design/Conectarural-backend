@@ -34,10 +34,37 @@ router.post('/', authenticateToken, async (req, res) => {
         (SELECT id_tecnico FROM asignacion_tecnico_usuaria
          WHERE id_usuaria = $1 AND estado = 'activa'
          ORDER BY fecha DESC LIMIT 1))
-      RETURNING id_incidencia, asunto, estado, prioridad, date_create;
+      RETURNING id_incidencia, asunto, estado, prioridad, date_create, id_tecnico;
     `;
     const result = await query(sql, [idUsuario, asunto, descripcion, prioridad, tipo_contacto]);
-    res.status(201).json({ message: 'Incidencia creada correctamente', incidencia: result.rows[0] });
+    const incidencia = result.rows[0];
+
+    // Notificación push a la técnica asignada
+    if (incidencia.id_tecnico) {
+      try {
+        const tokenResult = await query(
+          `SELECT fcm_token FROM usuario WHERE id_usuario = $1`,
+          [incidencia.id_tecnico]
+        );
+        const fcmToken = tokenResult.rows[0]?.fcm_token;
+        if (fcmToken) {
+          await sendPush(
+            fcmToken,
+            'Nueva consulta recibida',
+            `Consulta: ${incidencia.asunto}`,
+            { id_incidencia: String(incidencia.id_incidencia), tipo: 'nueva_consulta' }
+          );
+        }
+      } catch (_) { /* la notificación no debe bloquear la respuesta */ }
+    }
+
+    res.status(201).json({
+      message: incidencia.id_tecnico
+        ? 'Consulta enviada a tu técnica'
+        : 'Consulta registrada. Aún no tienes técnica asignada; recibirás respuesta en cuanto se te asigne una.',
+      sin_tecnica: !incidencia.id_tecnico,
+      incidencia,
+    });
   } catch (error) {
     console.error('Error al crear la incidencia:', error);
     res.status(500).json({ error: 'Error al crear la incidencia' });
@@ -74,7 +101,7 @@ router.get('/asignadas', authenticateToken, requireRol(2, 3), async (req, res) =
   const params = [req.user.id];
 
   let sql = `
-    SELECT i.id_incidencia, i.asunto, i.descripcion, i.prioridad,
+    SELECT i.id_incidencia, i.asunto, i.descripcion, i.respuesta, i.prioridad,
            i.estado, i.tipo_contacto, i.date_create,
            u.nombre AS usuaria_nombre, u.apellidos AS usuaria_apellidos,
            u.telefono AS usuaria_telefono, u.zona AS usuaria_zona
@@ -124,7 +151,14 @@ router.put('/:id', authenticateToken, requireRol(2, 3), async (req, res) => {
           descripcion = COALESCE($2, descripcion),
           respuesta   = COALESCE($3, respuesta)
       WHERE id_incidencia = $4
-        AND (id_tecnico = $5 OR $6 = 3)
+        AND (
+          $6 = 3
+          OR id_tecnico = $5
+          OR id_usuario IN (
+            SELECT id_usuaria FROM asignacion_tecnico_usuaria
+            WHERE id_tecnico = $5 AND estado = 'activa'
+          )
+        )
       RETURNING *;
     `;
     const result = await query(sql, [

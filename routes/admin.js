@@ -663,16 +663,41 @@ router.get('/stats/detalles', isAdminOrTecnica, async (req, res) => {
 // ═══════════════════════════════════════════════════════════════════════════
 router.get('/logs', isAdmin, async (req, res) => {
   try {
-    const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+    const limit  = Math.min(parseInt(req.query.limit)  || 50, 100);
+    const offset = Math.max(parseInt(req.query.offset) || 0,   0);
+    const { accion, desde, hasta } = req.query;
+
+    const params = [];
+    let where = '';
+
+    if (accion) {
+      params.push(accion);
+      where += ` AND l.accion = $${params.length}`;
+    }
+    if (desde) {
+      params.push(desde);
+      where += ` AND l.fecha >= $${params.length}`;
+    }
+    if (hasta) {
+      params.push(hasta);
+      where += ` AND l.fecha <= $${params.length}`;
+    }
+
+    params.push(limit + 1, offset); // +1 para detectar si hay más páginas
     const { rows } = await db.query(`
       SELECT l.id_log, l.accion, l.entidad, l.id_entidad, l.detalle, l.fecha,
-             u.nombre AS admin_nombre, u.apellidos AS admin_apellidos
+             u.nombre AS admin_nombre, u.apellidos AS admin_apellidos,
+             eu.email AS entidad_email
       FROM log_admin l
-      LEFT JOIN usuario u ON l.id_admin = u.id_usuario
+      LEFT JOIN usuario u  ON l.id_admin  = u.id_usuario
+      LEFT JOIN usuario eu ON l.entidad = 'usuario' AND l.id_entidad = eu.id_usuario
+      WHERE 1=1 ${where}
       ORDER BY l.fecha DESC
-      LIMIT $1
-    `, [limit]);
-    res.json(rows);
+      LIMIT $${params.length - 1} OFFSET $${params.length}
+    `, params);
+
+    const hasMore = rows.length > limit;
+    res.json({ logs: rows.slice(0, limit), hasMore, offset, limit });
   } catch (err) {
     console.error('Error en GET /admin/logs:', err);
     res.status(500).json({ error: 'Error al obtener el log de auditoría' });
