@@ -25,6 +25,11 @@ const allowedOrigins = [
  
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Render (y cualquier reverse proxy) añade X-Forwarded-For.
+// Sin esto, express-rate-limit lanza ValidationError en producción.
+app.set('trust proxy', 1);
+
 const rateLimit = require('express-rate-limit');
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,

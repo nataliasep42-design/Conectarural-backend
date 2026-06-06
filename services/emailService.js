@@ -4,16 +4,34 @@ const path = require('path');
 
 function createTransporter() {
   if (!process.env.SMTP_USER || !process.env.SMTP_PASS) return null;
+  const port   = parseInt(process.env.SMTP_PORT || '465', 10);
+  const secure = port === 465;
   return nodemailer.createTransport({
-    host:   process.env.SMTP_HOST || 'smtp.gmail.com',
-    port:   parseInt(process.env.SMTP_PORT || '465', 10),
-    secure: (process.env.SMTP_PORT || '465') === '465',
+    host: process.env.SMTP_HOST || 'smtp.gmail.com',
+    port,
+    secure,
     auth: {
       user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASS,
+      pass: process.env.SMTP_PASS.replace(/\s/g, ''), // permite espacios en la App Password
     },
   });
 }
+
+// Verifica la conexión SMTP al arrancar el servidor y deja traza en los logs.
+async function verifyConnection() {
+  const t = createTransporter();
+  if (!t) {
+    console.warn('[email] SMTP no configurado (SMTP_USER / SMTP_PASS vacíos)');
+    return;
+  }
+  try {
+    await t.verify();
+    console.log('[email] Conexión SMTP OK →', process.env.SMTP_USER);
+  } catch (err) {
+    console.error('[email] Error al conectar con SMTP:', err.message);
+  }
+}
+verifyConnection();
 
 function welcomeHtml(nombre) {
   return `
@@ -107,8 +125,11 @@ async function sendWelcomeEmail(nombre, email) {
     return;
   }
 
-  const from = process.env.EMAIL_FROM || `"ConectaRural" <${process.env.SMTP_USER}>`;
+  // Gmail exige que el remitente coincida con la cuenta autenticada.
+  // EMAIL_FROM solo se usa si el dominio coincide; en caso contrario usamos SMTP_USER.
+  const from = `"ConectaRural" <${process.env.SMTP_USER}>`;
 
+  console.log('[email] Enviando bienvenida a', email);
   await transporter.sendMail({
     from,
     to:      email,

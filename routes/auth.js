@@ -52,7 +52,7 @@ router.post('/register', async (req, res) => {
  
     // Correo de bienvenida — fire-and-forget, no bloquea ni rompe el registro
     sendWelcomeEmail(nombre, email).catch(err =>
-      console.error('[email] Error al enviar bienvenida:', err.message)
+      console.error('[email] Error al enviar bienvenida:', err)
     );
 
     res.status(201).json({
