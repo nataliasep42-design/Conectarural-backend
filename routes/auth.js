@@ -1,10 +1,11 @@
 // routes/auth.js
- 
+
 const express = require('express');
 const router = express.Router();
 const { query } = require('../db');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const { sendWelcomeEmail } = require('../services/emailService');
  
 // POST /auth/register -------------------------------------------------
 router.post('/register', async (req, res) => {
@@ -49,6 +50,11 @@ router.post('/register', async (req, res) => {
     `;
     const result = await query(sql, [nombre, apellidos, email, telefono, passHash, zona]);
  
+    // Correo de bienvenida — fire-and-forget, no bloquea ni rompe el registro
+    sendWelcomeEmail(nombre, email).catch(err =>
+      console.error('[email] Error al enviar bienvenida:', err.message)
+    );
+
     res.status(201).json({
       message: 'Usuario registrado con éxito',
       id: result.rows[0].id_usuario
