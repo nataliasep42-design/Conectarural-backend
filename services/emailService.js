@@ -1,37 +1,7 @@
 // services/emailService.js
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
+const fs   = require('fs');
 const path = require('path');
-
-function createTransporter() {
-  if (!process.env.SMTP_USER || !process.env.SMTP_PASS) return null;
-  const port   = parseInt(process.env.SMTP_PORT || '465', 10);
-  const secure = port === 465;
-  return nodemailer.createTransport({
-    host: process.env.SMTP_HOST || 'smtp.gmail.com',
-    port,
-    secure,
-    auth: {
-      user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASS.replace(/\s/g, ''), // permite espacios en la App Password
-    },
-  });
-}
-
-// Verifica la conexión SMTP al arrancar el servidor y deja traza en los logs.
-async function verifyConnection() {
-  const t = createTransporter();
-  if (!t) {
-    console.warn('[email] SMTP no configurado (SMTP_USER / SMTP_PASS vacíos)');
-    return;
-  }
-  try {
-    await t.verify();
-    console.log('[email] Conexión SMTP OK →', process.env.SMTP_USER);
-  } catch (err) {
-    console.error('[email] Error al conectar con SMTP:', err.message);
-  }
-}
-verifyConnection();
 
 function welcomeHtml(nombre) {
   return `
@@ -115,34 +85,38 @@ function welcomeHtml(nombre) {
 }
 
 /**
- * Envía el correo de bienvenida al nuevo usuario.
+ * Envía el correo de bienvenida usando la API de Resend (HTTPS, sin SMTP).
  * Fire-and-forget: los errores se registran pero no interrumpen el registro.
  */
 async function sendWelcomeEmail(nombre, email) {
-  const transporter = createTransporter();
-  if (!transporter) {
-    console.warn('[email] SMTP no configurado — se omite el correo de bienvenida');
+  if (!process.env.RESEND_API_KEY) {
+    console.warn('[email] RESEND_API_KEY no configurado — se omite el correo de bienvenida');
     return;
   }
 
-  // Gmail exige que el remitente coincida con la cuenta autenticada.
-  // EMAIL_FROM solo se usa si el dominio coincide; en caso contrario usamos SMTP_USER.
-  const from = `"ConectaRural" <${process.env.SMTP_USER}>`;
+  const resend = new Resend(process.env.RESEND_API_KEY);
+  const from   = process.env.EMAIL_FROM || 'ConectaRural <onboarding@resend.dev>';
+
+  const logoBuffer = fs.readFileSync(path.join(__dirname, '..', 'assets', 'logo.png'));
 
   console.log('[email] Enviando bienvenida a', email);
-  await transporter.sendMail({
+
+  const { data, error } = await resend.emails.send({
     from,
-    to:      email,
+    to:      [email],
     subject: '¡Bienvenida a ConectaRural!',
     html:    welcomeHtml(nombre),
     attachments: [
       {
-        filename: 'logo.png',
-        path:     path.join(__dirname, '..', 'assets', 'logo.png'),
-        cid:      'logo_conectarural',
+        filename:   'logo.png',
+        content:    logoBuffer,
+        content_id: 'logo_conectarural',
       },
     ],
   });
+
+  if (error) throw new Error(JSON.stringify(error));
+  console.log('[email] Correo enviado OK, id:', data.id);
 }
 
 module.exports = { sendWelcomeEmail };
