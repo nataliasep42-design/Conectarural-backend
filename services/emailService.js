@@ -1,7 +1,7 @@
 // services/emailService.js
-const { Resend } = require('resend');
-const fs   = require('fs');
-const path = require('path');
+// Usa la API HTTP de Brevo (no SMTP) → funciona en Render sin restricciones de puerto.
+
+const LOGO_URL = 'https://conectarural-26759.web.app/logo.png';
 
 function welcomeHtml(nombre) {
   return `
@@ -20,7 +20,7 @@ function welcomeHtml(nombre) {
           <!-- Cabecera verde -->
           <tr>
             <td align="center" style="background-color:#2e7d32;padding:32px 24px 24px;">
-              <img src="cid:logo_conectarural" alt="ConectaRural" height="72" style="display:block;"/>
+              <img src="${LOGO_URL}" alt="ConectaRural" height="72" style="display:block;"/>
             </td>
           </tr>
 
@@ -85,38 +85,40 @@ function welcomeHtml(nombre) {
 }
 
 /**
- * Envía el correo de bienvenida usando la API de Resend (HTTPS, sin SMTP).
+ * Envía el correo de bienvenida via Brevo Transactional Email API (HTTPS).
  * Fire-and-forget: los errores se registran pero no interrumpen el registro.
  */
 async function sendWelcomeEmail(nombre, email) {
-  if (!process.env.RESEND_API_KEY) {
-    console.warn('[email] RESEND_API_KEY no configurado — se omite el correo de bienvenida');
+  if (!process.env.BREVO_API_KEY) {
+    console.warn('[email] BREVO_API_KEY no configurado — se omite el correo de bienvenida');
     return;
   }
 
-  const resend = new Resend(process.env.RESEND_API_KEY);
-  const from   = process.env.EMAIL_FROM || 'ConectaRural <onboarding@resend.dev>';
-
-  const logoBuffer = fs.readFileSync(path.join(__dirname, '..', 'assets', 'logo.png'));
+  const senderEmail = process.env.EMAIL_SENDER || 'natalia.betsep@gmail.com';
 
   console.log('[email] Enviando bienvenida a', email);
 
-  const { data, error } = await resend.emails.send({
-    from,
-    to:      [email],
-    subject: '¡Bienvenida a ConectaRural!',
-    html:    welcomeHtml(nombre),
-    attachments: [
-      {
-        filename:   'logo.png',
-        content:    logoBuffer,
-        content_id: 'logo_conectarural',
-      },
-    ],
+  const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+    method: 'POST',
+    headers: {
+      'api-key':      process.env.BREVO_API_KEY,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      sender:      { name: 'ConectaRural', email: senderEmail },
+      to:          [{ email, name: nombre }],
+      subject:     '¡Bienvenida a ConectaRural!',
+      htmlContent: welcomeHtml(nombre),
+    }),
   });
 
-  if (error) throw new Error(JSON.stringify(error));
-  console.log('[email] Correo enviado OK, id:', data.id);
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(JSON.stringify(err));
+  }
+
+  const data = await response.json();
+  console.log('[email] Correo enviado OK, messageId:', data.messageId);
 }
 
 module.exports = { sendWelcomeEmail };
