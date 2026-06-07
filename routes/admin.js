@@ -5,30 +5,19 @@ const express = require('express');
 const router  = express.Router();
 const db      = require('../db');
 const path    = require('path');
-const fs      = require('fs');
 const authenticateToken = require('../middleware/authMiddleware');
 const { isAdmin, isAdminOrTecnica } = require('../middleware/isAdmin');
 const { logAdmin } = require('../utils/logAdmin');
+const { uploadBuffer, deleteByUrl } = require('../services/storageService');
 
 // Multer para subida de vídeos (carga diferida para no romper si no está instalado)
+// Usa memoryStorage: el archivo llega como buffer en RAM y se sube directamente a
+// Firebase Storage (routes/admin.js no debe escribir en el disco local de Render,
+// que es efímero y se borra en cada reinicio/redespliegue).
 let upload;
 try {
   const multer = require('multer');
-  const videoStorage = multer.diskStorage({
-    destination: (req, file, cb) => {
-      const dir = path.join(__dirname, '..', 'uploads', 'videos');
-      fs.mkdirSync(dir, { recursive: true });
-      cb(null, dir);
-    },
-    filename: (req, file, cb) => {
-      const ext = path.extname(file.originalname) || '.mp4';
-      cb(null, `modulo_${req.params.id}_${Date.now()}${ext}`);
-    },
-  });
-  // Tipos de archivo permitidos en módulos (vídeo + documentos + imágenes)
   const ALLOWED_VIDEO_EXTS = ['.mp4', '.mov', '.avi', '.webm', '.mkv', '.m4v'];
-  const ALLOWED_VIDEO_MIMES = ['video/mp4', 'video/quicktime', 'video/avi',
-    'video/webm', 'video/x-matroska', 'video/x-msvideo', 'application/octet-stream'];
 
   const videoFilter = (req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
@@ -39,7 +28,7 @@ try {
   };
 
   upload = multer({
-    storage: videoStorage,
+    storage: multer.memoryStorage(),
     limits: { fileSize: 500 * 1024 * 1024 },
     fileFilter: videoFilter,
   });
@@ -585,14 +574,16 @@ router.post('/modulos/:id/video', isAdmin, (req, res, next) => {
     return res.status(400).json({ error: 'No se ha enviado ningún archivo de vídeo' });
   }
   try {
-    const url = `/uploads/videos/${req.file.filename}`;
+    const ext = path.extname(req.file.originalname).toLowerCase() || '.mp4';
+    const destPath = `videos/modulo_${req.params.id}_${Date.now()}${ext}`;
+    const url = await uploadBuffer(req.file.buffer, destPath, req.file.mimetype);
     const sizeMb = parseFloat((req.file.size / (1024 * 1024)).toFixed(2));
     const { rows, rowCount } = await db.query(
       `UPDATE modulo SET url_archivo = $1, size_mb = $2 WHERE id_modulo = $3 RETURNING *`,
       [url, sizeMb, req.params.id]
     );
     if (rowCount === 0) {
-      fs.unlinkSync(path.join(__dirname, '..', 'uploads', 'videos', req.file.filename));
+      await deleteByUrl(url);
       return res.status(404).json({ error: 'Módulo no encontrado' });
     }
     res.json({ message: 'Vídeo subido correctamente', url, modulo: rows[0] });
@@ -723,33 +714,23 @@ router.post('/modulos/:id/documento', isAdmin, (req, res, next) => {
   };
 
   const multer = require('multer');
-  const docStorage = multer.diskStorage({
-    destination: (req, file, cb) => {
-      const dir = path.join(__dirname, '..', 'uploads', 'documentos');
-      fs.mkdirSync(dir, { recursive: true });
-      cb(null, dir);
-    },
-    filename: (req, file, cb) => {
-      const ext = path.extname(file.originalname);
-      cb(null, `modulo_${req.params.id}_${Date.now()}${ext}`);
-    },
-  });
-
-  multer({ storage: docStorage, limits: { fileSize: 50 * 1024 * 1024 }, fileFilter: docFilter })
+  multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 }, fileFilter: docFilter })
     .single('documento')(req, res, next);
 }, async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: 'No se ha enviado ningún archivo' });
   }
   try {
-    const url = `/uploads/documentos/${req.file.filename}`;
+    const ext = path.extname(req.file.originalname).toLowerCase();
+    const destPath = `documentos/modulo_${req.params.id}_${Date.now()}${ext}`;
+    const url = await uploadBuffer(req.file.buffer, destPath, req.file.mimetype);
     const sizeMb = parseFloat((req.file.size / (1024 * 1024)).toFixed(2));
     const { rows, rowCount } = await db.query(
       `UPDATE modulo SET url_archivo = $1, size_mb = $2 WHERE id_modulo = $3 RETURNING *`,
       [url, sizeMb, req.params.id]
     );
     if (rowCount === 0) {
-      fs.unlinkSync(path.join(__dirname, '..', 'uploads', 'documentos', req.file.filename));
+      await deleteByUrl(url);
       return res.status(404).json({ error: 'Módulo no encontrado' });
     }
     res.json({ message: 'Documento subido correctamente', url, modulo: rows[0] });
