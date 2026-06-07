@@ -1,7 +1,7 @@
 // services/emailService.js
 // Usa la API HTTP de Brevo (no SMTP) → funciona en Render sin restricciones de puerto.
 
-const LOGO_URL = 'https://conectarural-26759.web.app/logo.png';
+const LOGO_URL = 'https://conectarural-landing.web.app/logo.png';
 
 function welcomeHtml(nombre) {
   return `
